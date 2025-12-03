@@ -64,7 +64,7 @@ def q2zugferd_pdf(
     # --- 4. EmbeddedFile stream ---
     ef_stream = pdf.make_stream(xml_bytes)
     ef_stream["/Type"] = "/EmbeddedFile"
-    ef_stream.Subtype = xml_mime
+    ef_stream["/Subtype"] = xml_mime
 
     filename = "zugferd-invoice.xml"
 
@@ -104,6 +104,11 @@ def q2zugferd_pdf(
     xmp = b"""<?xpacket begin='\ufeff' id='W5M0MpCehiHzreSzNTczkc9d'?>
 <x:xmpmeta xmlns:x='adobe:ns:meta/'>
  <rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>
+  <rdf:Description rdf:about=""
+    xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
+   <pdfaid:part>3</pdfaid:part>
+   <pdfaid:conformance>B</pdfaid:conformance>
+  </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end='w'?>"""
@@ -112,9 +117,9 @@ def q2zugferd_pdf(
     meta_stream["/Subtype"] = "/XML"
     pdf.Root["/Metadata"] = pdf.make_indirect(meta_stream)
 
-    with pdf.open_metadata(set_pikepdf_as_editor=True) as meta:
-        meta["pdfaid:part"] = "3"
-        meta["pdfaid:conformance"] = pdfa_level  # "B"
+    # with pdf.open_metadata(set_pikepdf_as_editor=True) as meta:
+    #     meta["pdfaid:part"] = "3"
+    #     meta["pdfaid:conformance"] = pdfa_level  # "B"
 
     # --- 9. Save as PDF/A-3B ---
     try:
