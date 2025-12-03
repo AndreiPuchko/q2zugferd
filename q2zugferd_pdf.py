@@ -1,9 +1,6 @@
 import os
 import pikepdf
-from pikepdf import Dictionary
-
-def Name(x):
-    return x
+from pikepdf import Dictionary, Name
 
 
 def q2zugferd_pdf(
@@ -12,7 +9,7 @@ def q2zugferd_pdf(
     output_pdf: str,
     icc_profile_path: str,
     pdfa_level="B",  # "A" or "B"
-    xml_mime="application/xml",
+    xml_mime="application/octet-stream",
 ):
     """
     Create PDF/A-3 with embedded ZUGFeRD / Factur-X XML.
@@ -29,13 +26,16 @@ def q2zugferd_pdf(
         pdf.close()
         raise FileNotFoundError(f"ICC profile not found: {icc_profile_path}")
 
-    # Создание ICC потока
+    # Create ICC stream
     icc_stream = pdf.make_stream(icc_data)
-    icc_stream["/N"] = 3
+    icc_stream["/N"] = 3  # 3 channels for RGB
     icc_stream["/Alternate"] = "/DeviceRGB"
 
+    # Ensure the ICC profile is RGB (user must provide a valid RGB ICC profile)
+    # If you want to enforce, you could check the profile header, but this is usually not necessary.
+
     # OutputIntent
-    pdf.Root.OutputIntents = [
+    pdf.Root["/OutputIntents"] = [
         Dictionary(
             {
                 "/Type": "/OutputIntent",
@@ -47,10 +47,16 @@ def q2zugferd_pdf(
         )
     ]
 
-    # --- Ensure DefaultRGB for DeviceRGB ---
+    # Ensure DefaultRGB for DeviceRGB in document root
     if "/Resources" not in pdf.Root:
         pdf.Root["/Resources"] = Dictionary()
     pdf.Root["/Resources"]["/DefaultRGB"] = pdf.make_indirect(icc_stream)
+
+    # Ensure DefaultRGB for DeviceRGB in every page
+    for page in pdf.pages:
+        resources = page.get("/Resources", Dictionary())
+        page["/Resources"] = resources
+        resources["/DefaultRGB"] = pdf.make_indirect(icc_stream)
 
     # --- 3. Read XML ---
     if isinstance(xml_path, (bytes, bytearray)):
@@ -64,7 +70,7 @@ def q2zugferd_pdf(
     # --- 4. EmbeddedFile stream ---
     ef_stream = pdf.make_stream(xml_bytes)
     ef_stream["/Type"] = "/EmbeddedFile"
-    ef_stream["/Subtype"] = xml_mime
+    ef_stream["/Subtype"] = "application/xml"  # Valid MIME type for ZUGFeRD XML
 
     filename = "zugferd-invoice.xml"
 
@@ -74,13 +80,12 @@ def q2zugferd_pdf(
             "/Type": "/Filespec",
             "/F": filename,
             "/UF": filename,
-            "/Subtype": xml_mime,  # ✅ required for veraPDF
-            "/AFRelationship": "/Data",  # ✅ required for PDF/A-3
+            "/Subtype": "application/xml",  # Valid MIME type for ZUGFeRD XML
+            "/AFRelationship": Name("/Data"),
             "/EF": Dictionary({"/F": pdf.make_indirect(ef_stream)}),
             "/Desc": "ZUGFeRD / Factur-X Invoice XML",
         }
     )
-    file_spec["/AFRelationship"] = "/Data"
 
     file_spec_ref = pdf.make_indirect(file_spec)
 
@@ -116,10 +121,6 @@ def q2zugferd_pdf(
     meta_stream["/Type"] = "/Metadata"
     meta_stream["/Subtype"] = "/XML"
     pdf.Root["/Metadata"] = pdf.make_indirect(meta_stream)
-
-    # with pdf.open_metadata(set_pikepdf_as_editor=True) as meta:
-    #     meta["pdfaid:part"] = "3"
-    #     meta["pdfaid:conformance"] = pdfa_level  # "B"
 
     # --- 9. Save as PDF/A-3B ---
     try:
