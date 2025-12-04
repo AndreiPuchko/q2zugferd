@@ -2,7 +2,76 @@ import os
 import datetime
 import hashlib
 import pikepdf
-from pikepdf import Dictionary, Name
+from pikepdf import Dictionary, Name, Array
+
+
+def set_default_color_spaces(resources_dict, icc_ref):
+    # DefaultRGB covers DeviceRGB
+    resources_dict["/DefaultRGB"] = icc_ref
+
+
+def check_colorspaces(pdf):
+    count_device_rgb = 0
+    for i, page in enumerate(pdf.pages):
+        resources = page.get("/Resources", {})
+        cs_dict = resources.get("/ColorSpace", {})
+        for name, cs_ref in cs_dict.items():
+            try:
+                cs = cs_ref.resolve()
+                if cs.get("/CS") == "/DeviceRGB":
+                    print(f"Page {i}: {name} -> DeviceRGB")
+                    count_device_rgb += 1
+            except:
+                pass
+    print(f"Total DeviceRGB ColorSpaces: {count_device_rgb}")
+
+
+def replace_device_rgb(pdf, icc_ref):
+    """Safely replace DeviceRGB ColorSpace entries with ICCBased"""
+
+    # Correct ICCBased array format: [/ICCBased <icc_stream> /N 3]
+    iccbased_array = Array([Name("/ICCBased"), icc_ref, 3])  # ICC stream reference  # Component count
+    iccbased_ref = pdf.make_indirect(iccbased_array)
+
+    def safe_replace_cs(resources_dict):
+        if not isinstance(resources_dict, Dictionary):
+            return
+
+        # Replace ColorSpace entries SAFELY
+        colorspaces = resources_dict.get("/ColorSpace")
+        if isinstance(colorspaces, Dictionary):
+            items_to_replace = []
+            for cs_name, cs_ref in colorspaces.items():
+                try:
+                    cs = cs_ref.resolve()
+                    # Only replace if it's explicitly DeviceRGB
+                    if (
+                        isinstance(cs, Dictionary)
+                        and cs.get("/Type") == "/ColorSpace"
+                        and cs.get("/CS") == "/DeviceRGB"
+                    ):
+                        items_to_replace.append((cs_name, iccbased_ref))
+                except:
+                    pass
+
+            # Apply replacements after scanning (avoid modification during iteration)
+            for cs_name, new_ref in items_to_replace:
+                colorspaces[cs_name] = new_ref
+
+    # Apply to document, pages, and nested resources
+    for page in pdf.pages:
+        # Page resources
+        page_resources = page.get("/Resources", Dictionary())
+        safe_replace_cs(page_resources)
+        page["/Resources"] = page_resources
+
+        # Page Group (transparency)
+        group = page.get("/Group")
+        if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
+            if isinstance(group.get("/CS"), (str, Name)) and group["/CS"] == "/DeviceRGB":
+                group["/CS"] = icc_ref  # Direct ICC stream for Group/CS
+
+    return iccbased_ref
 
 
 def q2zugferd_pdf(
@@ -53,7 +122,7 @@ def q2zugferd_pdf(
             "/OutputConditionIdentifier": "sRGB IEC61966-2.1",
             "/RegistryName": "http://www.color.org",
             "/DestOutputProfile": icc_ref,
-            "/Info": "sRGB IEC61966-2.1",
+            "/Info": "sRGB2014 ICC profile",
         }
     )
     pdf.Root["/OutputIntents"] = [output_intent]
@@ -63,14 +132,83 @@ def q2zugferd_pdf(
         pdf.Root["/Resources"] = Dictionary()
     pdf.Root["/Resources"]["/DefaultRGB"] = icc_ref
 
+    # 2. Function to recursively update resources
+
+    def update_resources(resources_dict, icc_ref):
+        # Ensure defaults on this dict first
+        if isinstance(resources_dict, Dictionary):
+            resources_dict["/DefaultRGB"] = icc_ref
+
+            # XObjects
+            xobjects = resources_dict.get("/XObject")
+            if isinstance(xobjects, Dictionary):
+                for xobject_name, xobject_ref in xobjects.items():
+                    try:
+                        xobject = xobject_ref.resolve()
+                        if isinstance(xobject, Dictionary) and xobject.get("/Subtype") == "/Form":
+                            # Fix Form XObject resources
+                            xobject_resources = xobject.get("/Resources", Dictionary())
+                            update_resources(xobject_resources, icc_ref)
+                            xobject["/Resources"] = xobject_resources
+
+                            # Fix transparency group colour space
+                            group = xobject.get("/Group")
+                            if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
+                                group["/CS"] = icc_ref
+                    except Exception:
+                        # Skip unresolvable XObjects
+                        pass
+
+            # Patterns
+            patterns = resources_dict.get("/Pattern")
+            if isinstance(patterns, Dictionary):
+                for pattern_name, pattern_ref in patterns.items():
+                    try:
+                        pattern = pattern_ref.resolve()
+                        if isinstance(pattern, Dictionary):
+                            pattern_resources = pattern.get("/Resources", Dictionary())
+                            update_resources(pattern_resources, icc_ref)
+                    except Exception:
+                        pass
+
+            # ExtGState - FIXED: Add proper type checking
+            extgstate = resources_dict.get("/ExtGState")
+            if isinstance(extgstate, Dictionary):
+                for gs_name, gs_ref in extgstate.items():
+                    try:
+                        gs = gs_ref.resolve()
+                        if isinstance(gs, Dictionary):
+                            # Fix blending spaces in ExtGState
+                            if "/BG2" in gs:
+                                gs["/BG2"] = icc_ref
+                            if "/BG" in gs:
+                                gs["/BG"] = icc_ref
+                    except Exception:
+                        # Skip unresolvable ExtGState entries
+                        pass
+
+    # 3. Apply fix to all pages
     for page in pdf.pages:
-        # Create or retrieve the resources dictionary
-        resources = page.get("/Resources", Dictionary())
-        page["/Resources"] = resources
+        page_resources = page.get("/Resources", Dictionary())
+        update_resources(page_resources, icc_ref)  # Pass icc_ref
+        page["/Resources"] = page_resources
 
-        # Ensure DefaultRGB is set at the page level for DeviceRGB usage
-        resources["/DefaultRGB"] = icc_ref
+        # Also fix page-level transparency groups
+        group = page.get("/Group")
+        if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
+            group["/CS"] = icc_ref
 
+    check_colorspaces(pdf)
+    iccbased_rgb = replace_device_rgb(pdf, icc_ref)
+    check_colorspaces(pdf)
+    
+    for page in pdf.pages:
+        group = page.get("/Group")
+        if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
+            if group.get("/CS") == "/DeviceRGB":
+                group["/CS"] = icc_ref
+    
+    
     # --- 3. Embed XML File ---
 
     pdf_date_str = mod_date.strftime("D:%Y%m%d%H%M%S+00'00'")
@@ -201,5 +339,7 @@ def q2zugferd_pdf(
 
     # --- 6. Save ---
     # The pdfa_mode argument is not used; compliance is achieved by setting the correct structure.
+    # Call this after your existing resource updates:
+
     pdf.save(output_pdf, linearize=True)
     pdf.close()
