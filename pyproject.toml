@@ -16,8 +16,13 @@ dependencies = [
     "lxml"
 ]
 
-[tool.setuptools]
-packages = ["q2zugferd"]
+#[tool.setuptools]
+#packages = ["q2zugferd"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["q2zugferd*"]
+exclude = ["datasets", "tests"]
 
 # package-data for ICC
 [tool.setuptools.package-data]
