@@ -22,7 +22,14 @@ function Save-TomlWithoutBOM {
 
 Save-TomlWithoutBOM "pyproject.toml"
 
+if (Test-Path dist) {
+    Remove-Item dist -Recurse -Force
+}
+
 python -m build
 
 $wheel = Get-ChildItem dist\$ProjectName-*-py3-none-any.whl | Select-Object -First 1
 Copy-Item $wheel.FullName dist\$ProjectName-0-py3-none-any.whl -Force
+Copy-Item $ProjectName\version.py dist\version.py -Force
+$latestFilePath = "dist\latest"
+Set-Content -Path $latestFilePath -Value $wheel.Name -Encoding UTF8

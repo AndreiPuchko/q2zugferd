@@ -116,6 +116,11 @@ if ($LASTEXITCODE -ne 0) {
 $wheel = Get-ChildItem dist\*-py3-none-any.whl | Select-Object -First 1
 Copy-Item $wheel.FullName "dist\$LatestWheelName" -Force
 
+Copy-Item $ProjectName\version.py dist\version.py -Force
+$latestFilePath = "dist\latest"
+Set-Content -Path $latestFilePath -Value $wheel.Name -Encoding UTF8
+
+
 Write-Host "✅ Latest wheel created: dist\$LatestWheelName"
 
 # -----------------------------
