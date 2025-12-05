@@ -1,6 +1,6 @@
 {
     "python.testing.pytestArgs": [
-        "q2zugferd"
+        "tests"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
