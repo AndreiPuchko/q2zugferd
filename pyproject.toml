@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "q2zugferd"
+version = "0.1.0"
+description = "ZUGFeRD / Factur-X PDF and XML generator"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Andrei Puchko"}
+]
+requires-python = ">=3.9"
+dependencies = [
+    "pikepdf",
+]
+
+[tool.setuptools]
+packages = ["q2zugferd"]
+
+[tool.setuptools.package-data]
+q2zugferd = ["icc/*.icc"]

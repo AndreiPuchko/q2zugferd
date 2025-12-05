@@ -1,8 +1,7 @@
 import os
-import datetime
-import hashlib
 import pikepdf
 from pikepdf import Dictionary, Name, Array
+from importlib.resources import files
 
 
 def replace_device_rgb_recursive(pdf, resources, icc_ref):
@@ -153,12 +152,13 @@ def scan_for_device_rgb(pdf):
         print(f"⚠️ Total DeviceRGB references remaining: {issues_found}")
 
 
-def q2zugferd_pdf(input_pdf, xml_path, output_pdf, icc_profile_path, pdfa_level="B"):
+def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     """Main function with automatic DeviceRGB check"""
     # --- Open PDF ---
     pdf = pikepdf.open(input_pdf)
 
     # --- Load ICC profile ---
+    icc_profile_path = files("q2zugferd").joinpath("icc/sRGB2014.icc")
     with open(icc_profile_path, "rb") as f:
         icc_data = f.read()
     icc_stream = pdf.make_stream(icc_data)
@@ -199,7 +199,7 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, icc_profile_path, pdfa_level=
             xml_bytes = f.read()
     else:
         xml_bytes = xml_path.encode("utf-8")
-    xml_filename = "zugferd-invoice.xml"
+    xml_filename = "factur-x.xml"
     xml_mime = Name("/application/xml")
     ef_stream = pdf.make_stream(xml_bytes)
     ef_stream["/Type"] = "/EmbeddedFile"
@@ -232,16 +232,71 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, icc_profile_path, pdfa_level=
     pdf.Root["/AF"].append(file_spec_ref)
 
     # Minimal XMP metadata
+    profile_name = "EN 16931"
     xmp = f"""<?xpacket begin='\ufeff' id='W5M0MpCehiHzreSzNTczkc9d'?>
-<x:xmpmeta xmlns:x='adobe:ns:meta/'>
- <rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>
-   <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
-     <pdfaid:part>3</pdfaid:part>
-     <pdfaid:conformance>{pdfa_level.upper()}</pdfaid:conformance>
-   </rdf:Description>
+<x:xmpmeta xmlns:x='adobe:ns:meta/' xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+           xmlns:pdfaid='http://www.aiim.org/pdfa/ns/id/'
+           xmlns:pdfaExtension='http://www.aiim.org/pdfa/ns/extension/'
+           xmlns:pdfaSchema='http://www.aiim.org/pdfa/ns/schema#'>
+ <rdf:RDF>
+  <rdf:Description rdf:about="" xmlns:pdfaid='http://www.aiim.org/pdfa/ns/id/'>
+   <pdfaid:part>3</pdfaid:part>
+   <pdfaid:conformance>{pdfa_level.upper()}</pdfaid:conformance>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="" xmlns:pdfaExtension='http://www.aiim.org/pdfa/ns/extension/'>
+   <pdfaExtension:schemas>
+    <rdf:Bag>
+     <rdf:li rdf:parseType='Resource'>
+      <pdfaSchema:schema>Factur-X 2.3.3</pdfaSchema:schema>
+      <pdfaSchema:namespaceURI>urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#</pdfaSchema:namespaceURI>
+      <pdfaSchema:prefix>fx</pdfaSchema:prefix>
+      <pdfaExtension:property>
+       <rdf:Seq>
+        <rdf:li rdf:parseType='Resource'>
+         <pdfaExtension:name>DocumentFileName</pdfaExtension:name>
+         <pdfaExtension:valueType>Text</pdfaExtension:valueType>
+         <pdfaExtension:category>external</pdfaExtension:category>
+         <pdfaExtension:description>Filename of embedded XML</pdfaExtension:description>
+        </rdf:li>
+        <rdf:li rdf:parseType='Resource'>
+         <pdfaExtension:name>DocumentType</pdfaExtension:name>
+         <pdfaExtension:valueType>Text</pdfaExtension:valueType>
+         <pdfaExtension:category>external</pdfaExtension:category>
+         <pdfaExtension:description>Document type (INVOICE)</pdfaExtension:description>
+        </rdf:li>
+        <rdf:li rdf:parseType='Resource'>
+         <pdfaExtension:name>Version</pdfaExtension:name>
+         <pdfaExtension:valueType>Text</pdfaExtension:valueType>
+         <pdfaExtension:category>external</pdfaExtension:category>
+         <pdfaExtension:description>ZUGFeRD version</pdfaExtension:description>
+        </rdf:li>
+        <rdf:li rdf:parseType='Resource'>
+         <pdfaExtension:name>Profile</pdfaExtension:name>
+         <pdfaExtension:valueType>Text</pdfaExtension:valueType>
+         <pdfaExtension:category>external</pdfaExtension:category>
+         <pdfaExtension:description>ZUGFeRD profile</pdfaExtension:description>
+        </rdf:li>
+       </rdf:Seq>
+      </pdfaExtension:property>
+     </rdf:li>
+    </rdf:Bag>
+   </pdfaExtension:schemas>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="" xmlns:fx="urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#">
+   <fx:DocumentFileName>factur-x.xml</fx:DocumentFileName>
+   <fx:DocumentType>INVOICE</fx:DocumentType>
+   <fx:Version>2.3.3</fx:Version>
+   <fx:Profile>{profile_name}</fx:Profile>
+  </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end='w'?>"""
+
+
+
+
     meta_stream = pdf.make_stream(xmp.encode("utf-8"))
     meta_stream["/Type"] = "/Metadata"
     meta_stream["/Subtype"] = "/XML"

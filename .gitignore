@@ -1,4 +1,9 @@
 datasets/*
 temp/*
+# Python artifacts
+*.egg
+*.egg-info/
+dist/
+build/
 *.pyc
 *.icc
