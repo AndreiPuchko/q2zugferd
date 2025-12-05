@@ -3,10 +3,18 @@ param (
     [string]$Bump = "patch"
 )
 
-Write-Host "=== q2zugferd build & release ===" -ForegroundColor Cyan
+# -----------------------------
+# 0. define project name
+# -----------------------------
+
+$ProjectName = Split-Path (Get-Location) -Leaf
+Write-Host "=== $ProjectName build & release ===" -ForegroundColor Cyan
+
+$VersionPyPath = "$ProjectName/version.py"
+$LatestWheelName = "$ProjectName-0-py3-none-any.whl"
 
 # -----------------------------
-# 0. Проверка git-статуса
+# 1. check git-status
 # -----------------------------
 
 $gitStatus = git status --porcelain
@@ -19,7 +27,7 @@ if ($gitStatus) {
 Write-Host "✅ Git working tree clean" -ForegroundColor Green
 
 # -----------------------------
-# 1. Получаем текущую версию
+# 2. get current version
 # -----------------------------
 
 $versionFile = "pyproject.toml"
@@ -27,7 +35,7 @@ $content = Get-Content $versionFile
 
 $versionLine = $content | Where-Object { $_ -match '^version\s*=' }
 if (-not $versionLine) {
-    Write-Error "version not found in pyproject.toml"
+    Write-Error "❌ version not found in pyproject.toml"
     exit 1
 }
 
@@ -49,34 +57,29 @@ $newVersion = "$major.$minor.$patch"
 Write-Host "New version: $newVersion" -ForegroundColor Green
 
 # -----------------------------
-# 2. Записываем новую версию в pyproject.toml
+# 3. write new version into pyproject.toml
 # -----------------------------
 
 $content = $content -replace 'version\s*=\s*".*"', "version = `"$newVersion`""
 Set-Content $versionFile $content -Encoding UTF8
 
 # -----------------------------
-# 3. Генерация q2zugferd/version.py
+# 4. update version.py
 # -----------------------------
-
-$versionPyPath = "q2zugferd/version.py"
 
 $versionPyContent = @"
 __version__ = "$newVersion"
 "@
 
-Set-Content $versionPyPath $versionPyContent -Encoding UTF8
+Set-Content $VersionPyPath $versionPyContent -Encoding UTF8
+Write-Host "✅ version.py generated: $VersionPyPath"
 
-Write-Host "* version.py generated: $versionPyPath"
+# -----------------------------
+# 5. remove BOM from pyproject.toml
+# -----------------------------
 
 function Save-TomlWithoutBOM {
-    param (
-        [string]$Path
-    )
-
-    if (!(Test-Path $Path)) {
-        throw "File not found: $Path"
-    }
+    param ([string]$Path)
 
     $content = Get-Content $Path -Raw
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -86,14 +89,14 @@ function Save-TomlWithoutBOM {
 Save-TomlWithoutBOM "pyproject.toml"
 
 # -----------------------------
-# 4. Git commit версии
+# 6. Git commit
 # -----------------------------
 
-git add pyproject.toml q2zugferd/version.py
+git add pyproject.toml $VersionPyPath
 git commit -m "chore: bump version to v$newVersion"
 
 # -----------------------------
-# 5. Build
+# 7. Build
 # -----------------------------
 
 if (Test-Path dist) {
@@ -101,14 +104,22 @@ if (Test-Path dist) {
 }
 
 python -m build
-
 if ($LASTEXITCODE -ne 0) {
     Write-Error "❌ Build failed"
     exit 1
 }
 
 # -----------------------------
-# 6. Git tag
+# 8. make latest-wheel
+# -----------------------------
+
+$wheel = Get-ChildItem dist\*-py3-none-any.whl | Select-Object -First 1
+Copy-Item $wheel.FullName "dist\$LatestWheelName" -Force
+
+Write-Host "✅ Latest wheel created: dist\$LatestWheelName"
+
+# -----------------------------
+# 9. Git tag
 # -----------------------------
 
 $tag = "v$newVersion"
@@ -118,7 +129,7 @@ git push
 git push origin $tag
 
 # -----------------------------
-# 7. Генерация Release Notes из git log
+# 10. make Release Notes из git log
 # -----------------------------
 
 $prevTag = git tag --sort=-v:refname | Select-Object -Skip 1 -First 1
@@ -136,10 +147,10 @@ if (-not $releaseNotes) {
 $releaseFile = "release_notes.txt"
 Set-Content $releaseFile $releaseNotes -Encoding UTF8
 
-Write-Host "✅ Release notes generated from git log"
+Write-Host "✅ Release notes generated"
 
 # -----------------------------
-# 8. GitHub Release (через gh)
+# 11. GitHub Release
 # -----------------------------
 
 gh release create $tag `
@@ -149,4 +160,4 @@ gh release create $tag `
 
 Remove-Item $releaseFile
 
-Write-Host "✅✅✅ Release $tag created and uploaded!" -ForegroundColor Green
+Write-Host "✅✅✅ Release $tag created and uploaded for $ProjectName!" -ForegroundColor Green

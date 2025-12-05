@@ -1,3 +1,11 @@
+$ProjectName = Split-Path (Get-Location) -Leaf
+Write-Host "=== $ProjectName build & release ===" -ForegroundColor Cyan
+
+$VersionPyPath = "$ProjectName/version.py"
+$LatestWheelName = "$ProjectName-0-py3-none-any.whl"
+
+
+
 function Save-TomlWithoutBOM {
     param (
         [string]$Path
@@ -15,3 +23,6 @@ function Save-TomlWithoutBOM {
 Save-TomlWithoutBOM "pyproject.toml"
 
 python -m build
+
+$wheel = Get-ChildItem dist\$ProjectName-*-py3-none-any.whl | Select-Object -First 1
+Copy-Item $wheel.FullName dist\$ProjectName-0-py3-none-any.whl -Force
