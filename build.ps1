@@ -67,9 +67,8 @@ __version__ = "$newVersion"
 
 Set-Content $versionPyPath $versionPyContent -Encoding UTF8
 
-Write-Host "✅ version.py generated: $versionPyPath"
+Write-Host "* version.py generated: $versionPyPath"
 
-exit 0
 # -----------------------------
 # 4. Git commit версии
 # -----------------------------
