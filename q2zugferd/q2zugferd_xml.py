@@ -21,7 +21,14 @@ QDT = "{%s}" % NS_MAP["qdt"]
 
 # --- MAIN XML GENERATOR ---
 def q2zugferd_xml(zugferd_data: dict):
-    """
+    """_summary_
+
+    Args:
+        zugferd_data (dict): _description_
+
+    Returns:
+        _type_: _description_
+    """    """
     Generates ZUGFeRD 2.1 XML (Basic Profile) from prepared data.
 
     :param zugferd_data: Dictionary with invoice data (structure as in zugferd_data).

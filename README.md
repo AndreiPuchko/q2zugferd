@@ -28,7 +28,6 @@ q2zugferd_pdf(
     "datasets/invoice1.pdf",      # Input PDF
     xml,                          # XML data (string)
     "temp/zugferd1.pdf",          # Output PDF/A-3 file
-    "icc/sRGB2014.icc"            # sRGB ICC profile
 )
 ```
 
@@ -37,16 +36,6 @@ q2zugferd_pdf(
 - Python 3.8+
 - lxml
 - pikepdf
-
-## Development
-
-Create a virtual environment and build the package:
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -U pip build twine
-```
 
 ## License
 
