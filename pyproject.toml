@@ -1,10 +1,10 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "q2zugferd"
-version = "0.1.4"
+version = "0.1.5"
 description = "ZUGFeRD / Factur-X PDF and XML generator"
 readme = "README.md"
 authors = [
