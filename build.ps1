@@ -133,36 +133,62 @@ git tag $tag
 git push
 git push origin $tag
 
-# -----------------------------
-# 10. make Release Notes из git log
-# -----------------------------
+# --- 6. Generate Release Notes ---
+$previousTag = git describe --tags --abbrev=0 $tag~1 2>$null
 
-$prevTag = git tag --sort=-v:refname | Select-Object -Skip 1 -First 1
-
-if ($prevTag) {
-    $releaseNotes = git log "$prevTag..$tag" --pretty=format:"- %s"
+if ($LASTEXITCODE -eq 0 -and $previousTag) {
+    $commits = git log $previousTag..HEAD --pretty=format:"%s"
 } else {
-    $releaseNotes = git log $tag --pretty=format:"- %s"
+    $commits = git log --pretty=format:"%s"
 }
 
-if (-not $releaseNotes) {
-    $releaseNotes = "- Initial release"
+# Initialize sections
+$added = @()
+$fixed = @()
+$changed = @()
+$others = @()
+
+foreach ($c in $commits) {
+    if ($c -match "^feat") { $added += "- $c" }
+    elseif ($c -match "^fix") { $fixed += "- $c" }
+    elseif ($c -match "^refactor|^chore") { $changed += "- $c" }
+    else { $others += "- $c" }
 }
 
-$releaseFile = "release_notes.txt"
-Set-Content $releaseFile $releaseNotes -Encoding UTF8
+$releaseNotes = "## Release v$version`n`n"
+if ($added.Count -gt 0) { $releaseNotes += "### Added`n" + ($added -join "`n") + "`n`n" }
+if ($fixed.Count -gt 0) { $releaseNotes += "### Fixed`n" + ($fixed -join "`n") + "`n`n" }
+if ($changed.Count -gt 0) { $releaseNotes += "### Changed`n" + ($changed -join "`n") + "`n`n" }
+if ($others.Count -gt 0) { $releaseNotes += "### Other`n" + ($others -join "`n") + "`n`n" }
 
-Write-Host "✅ Release notes generated"
+# --- 7. Prepare current version assets ---
+$whlFile = Get-ChildItem dist | Where-Object { $_.Name -like "*$version*.whl" } | Select-Object -First 1
+$tarFile = Get-ChildItem dist | Where-Object { $_.Name -like "*$version*.tar.gz" } | Select-Object -First 1
+$assets = @()
+if ($whlFile) { $assets += $whlFile.FullName }
+if ($tarFile) { $assets += $tarFile.FullName }
 
-# -----------------------------
-# 11. GitHub Release
-# -----------------------------
+# --- 8. Create GitHub Release via gh ---
+$ghExists = Get-Command gh -ErrorAction SilentlyContinue
+if (-not $ghExists) {
+    Write-Host "ERROR: GitHub CLI (gh) is not installed. Skipping GitHub Release."
+    Write-Host "Install with: winget install --id GitHub.cli"
+    exit 0
+}
 
-gh release create $tag `
-    dist/* `
-    --title "Release $tag" `
-    --notes-file $releaseFile
+$existingRelease = gh release view $tag 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "GitHub Release $tag already exists. Skipping release creation."
+} else {
+    Write-Host "Creating GitHub Release $tag ..."
 
-Remove-Item $releaseFile
+    gh release create $tag $assets `
+        --title "v$version" `
+        --notes "$releaseNotes"
 
-Write-Host "✅✅✅ Release $tag created and uploaded for $ProjectName!" -ForegroundColor Green
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "GitHub Release $tag successfully created."
+    } else {
+        Write-Host "ERROR: Failed to create GitHub Release."
+    }
+}
