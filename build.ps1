@@ -133,7 +133,10 @@ git tag $tag
 git push
 git push origin $tag
 
-# --- 6. Generate Release Notes ---
+# -----------------------------
+# 10. Generate Release Notes
+# -----------------------------
+
 $previousTag = git describe --tags --abbrev=0 $tag~1 2>$null
 
 if ($LASTEXITCODE -eq 0 -and $previousTag) {
@@ -142,7 +145,6 @@ if ($LASTEXITCODE -eq 0 -and $previousTag) {
     $commits = git log --pretty=format:"%s"
 }
 
-# Initialize sections
 $added = @()
 $fixed = @()
 $changed = @()
@@ -155,20 +157,30 @@ foreach ($c in $commits) {
     else { $others += "- $c" }
 }
 
-$releaseNotes = "## Release v$version`n`n"
-if ($added.Count -gt 0) { $releaseNotes += "### Added`n" + ($added -join "`n") + "`n`n" }
-if ($fixed.Count -gt 0) { $releaseNotes += "### Fixed`n" + ($fixed -join "`n") + "`n`n" }
+$releaseNotes = "## Release v$newVersion`n`n"
+if ($added.Count -gt 0)   { $releaseNotes += "### Added`n"   + ($added -join "`n")   + "`n`n" }
+if ($fixed.Count -gt 0)   { $releaseNotes += "### Fixed`n"   + ($fixed -join "`n")   + "`n`n" }
 if ($changed.Count -gt 0) { $releaseNotes += "### Changed`n" + ($changed -join "`n") + "`n`n" }
-if ($others.Count -gt 0) { $releaseNotes += "### Other`n" + ($others -join "`n") + "`n`n" }
+if ($others.Count -gt 0)  { $releaseNotes += "### Other`n"   + ($others -join "`n")  + "`n`n" }
 
-# --- 7. Prepare current version assets ---
-$whlFile = Get-ChildItem dist | Where-Object { $_.Name -like "*$version*.whl" } | Select-Object -First 1
-$tarFile = Get-ChildItem dist | Where-Object { $_.Name -like "*$version*.tar.gz" } | Select-Object -First 1
-$assets = @()
-if ($whlFile) { $assets += $whlFile.FullName }
-if ($tarFile) { $assets += $tarFile.FullName }
+# -----------------------------
+# 11. Collect ALL latest dist assets ✅
+# -----------------------------
 
-# --- 8. Create GitHub Release via gh ---
+$assets = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
+
+if ($assets.Count -eq 0) {
+    Write-Error "❌ No files found in dist/ for release!"
+    exit 1
+}
+
+Write-Host "✅ Release assets:"
+$assets | ForEach-Object { Write-Host " - $_" }
+
+# -----------------------------
+# 12. Create GitHub Release via gh ✅
+# -----------------------------
+
 $ghExists = Get-Command gh -ErrorAction SilentlyContinue
 if (-not $ghExists) {
     Write-Host "ERROR: GitHub CLI (gh) is not installed. Skipping GitHub Release."
@@ -176,19 +188,21 @@ if (-not $ghExists) {
     exit 0
 }
 
-$existingRelease = gh release view $tag 2>$null
+# ✅ Properly check if release already exists
+$releaseExists = gh release view $tag 2>$null
+
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "GitHub Release $tag already exists. Skipping release creation."
+    Write-Host "✅ GitHub Release $tag already exists. Skipping creation."
 } else {
-    Write-Host "Creating GitHub Release $tag ..."
+    Write-Host "🚀 Creating GitHub Release $tag ..."
 
     gh release create $tag $assets `
-        --title "v$version" `
+        --title "v$newVersion" `
         --notes "$releaseNotes"
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "GitHub Release $tag successfully created."
+        Write-Host "✅ GitHub Release $tag successfully created."
     } else {
-        Write-Host "ERROR: Failed to create GitHub Release."
+        Write-Host "❌ ERROR: Failed to create GitHub Release."
     }
 }
