@@ -15,7 +15,6 @@ QDT = "{%s}" % NS_MAP["qdt"]
 
 
 def q2zugferd_xml(zugferd_data: dict):
-
     invoice_header = zugferd_data["invoice_header"]
     seller = zugferd_data["seller"]
     buyer = zugferd_data["buyer"]
@@ -37,10 +36,14 @@ def q2zugferd_xml(zugferd_data: dict):
     # ------------------------------------------------------------------
     context = ET.SubElement(root, RSM + "ExchangedDocumentContext")
 
-    bus_proc = ET.SubElement(context, RAM + "BusinessProcessSpecifiedDocumentContextParameter")
+    bus_proc = ET.SubElement(
+        context, RAM + "BusinessProcessSpecifiedDocumentContextParameter"
+    )
     _add_text_element(bus_proc, RAM + "ID", "urn:factur-x.eu:1p0:comfort")
 
-    spec_doc = ET.SubElement(context, RAM + "GuidelineSpecifiedDocumentContextParameter")
+    spec_doc = ET.SubElement(
+        context, RAM + "GuidelineSpecifiedDocumentContextParameter"
+    )
     _add_text_element(
         spec_doc,
         RAM + "ID",
@@ -88,26 +91,38 @@ def q2zugferd_xml(zugferd_data: dict):
 
         trade_delivery = ET.SubElement(line_item, RAM + "SpecifiedLineTradeDelivery")
         unit_code = line.get("unit_code", "PCE")
-        billed_qty = ET.SubElement(trade_delivery, RAM + "BilledQuantity", unitCode=unit_code)
+        billed_qty = ET.SubElement(
+            trade_delivery, RAM + "BilledQuantity", unitCode=unit_code
+        )
         billed_qty.text = "{:.4f}".format(Decimal(line["quantity"]))
 
         # ✅ EN 16931: UNIT PRICE (MANDATORY)
         trade_agreement = ET.SubElement(line_item, RAM + "SpecifiedLineTradeAgreement")
         net_price = ET.SubElement(trade_agreement, RAM + "NetPriceProductTradePrice")
-        _add_text_element(net_price, RAM + "ChargeAmount", "{:.2f}".format(Decimal(line["net_price"])))
+        _add_text_element(
+            net_price, RAM + "ChargeAmount", "{:.2f}".format(Decimal(line["net_price"]))
+        )
 
-        trade_settlement = ET.SubElement(line_item, RAM + "SpecifiedLineTradeSettlement")
+        trade_settlement = ET.SubElement(
+            line_item, RAM + "SpecifiedLineTradeSettlement"
+        )
 
         tax = ET.SubElement(trade_settlement, RAM + "ApplicableTradeTax")
         _add_text_element(tax, RAM + "TypeCode", "VAT")
         _add_text_element(tax, RAM + "CategoryCode", "S")
-        _add_text_element(tax, RAM + "RateApplicablePercent", "{:.2f}".format(Decimal(line["vat_rate"])))
+        _add_text_element(
+            tax,
+            RAM + "RateApplicablePercent",
+            "{:.2f}".format(Decimal(line["vat_rate"])),
+        )
 
-        monetary_sum = ET.SubElement(trade_settlement, RAM + "SpecifiedTradeSettlementLineMonetarySummation")
+        monetary_sum = ET.SubElement(
+            trade_settlement, RAM + "SpecifiedTradeSettlementLineMonetarySummation"
+        )
         _add_text_element(
             monetary_sum,
             RAM + "LineTotalAmount",
-            "{:.2f}".format(Decimal(line["net_line_total"] or line["net_total"])),
+            "{:.2f}".format(Decimal(line.get("net_line_total", line.get("net_total")))),
         )
 
     # ------------------------------------------------------------------
@@ -146,11 +161,15 @@ def q2zugferd_xml(zugferd_data: dict):
     # D. DELIVERY
     # ------------------------------------------------------------------
     trade_delivery = ET.SubElement(transaction, RAM + "ApplicableHeaderTradeDelivery")
-    delivery_event = ET.SubElement(trade_delivery, RAM + "ActualDeliverySupplyChainEvent")
+    delivery_event = ET.SubElement(
+        trade_delivery, RAM + "ActualDeliverySupplyChainEvent"
+    )
 
     occurrence_date = ET.SubElement(delivery_event, RAM + "OccurrenceDateTime")
     delivery_date_str = invoice_header["delivery_date"].replace("-", "")
-    ET.SubElement(occurrence_date, UDT + "DateTimeString", format="102").text = delivery_date_str
+    ET.SubElement(
+        occurrence_date, UDT + "DateTimeString", format="102"
+    ).text = delivery_date_str
 
     # ------------------------------------------------------------------
     # E. SETTLEMENT
@@ -159,21 +178,37 @@ def q2zugferd_xml(zugferd_data: dict):
     _add_text_element(settlement, RAM + "InvoiceCurrencyCode", currency["iso_code"])
     _add_text_element(settlement, RAM + "TaxCurrencyCode", currency["iso_code"])
 
-    payment_means = ET.SubElement(settlement, RAM + "SpecifiedTradeSettlementPaymentMeans")
+    payment_means = ET.SubElement(
+        settlement, RAM + "SpecifiedTradeSettlementPaymentMeans"
+    )
     _add_text_element(payment_means, RAM + "TypeCode", "30")
 
     for vat_item in vat_breakdown:
         tax = ET.SubElement(settlement, RAM + "ApplicableTradeTax")
-        _add_text_element(tax, RAM + "CalculatedAmount", "{:.2f}".format(Decimal(vat_item["tax_amount"])))
+        _add_text_element(
+            tax,
+            RAM + "CalculatedAmount",
+            "{:.2f}".format(Decimal(vat_item["tax_amount"])),
+        )
         _add_text_element(tax, RAM + "TypeCode", "VAT")
-        _add_text_element(tax, RAM + "BasisAmount", "{:.2f}".format(Decimal(vat_item["tax_base_amount"])))
+        _add_text_element(
+            tax,
+            RAM + "BasisAmount",
+            "{:.2f}".format(Decimal(vat_item["tax_base_amount"])),
+        )
         _add_text_element(tax, RAM + "CategoryCode", "S")
-        _add_text_element(tax, RAM + "RateApplicablePercent", "{:.2f}".format(Decimal(vat_item["vat_rate"])))
+        _add_text_element(
+            tax,
+            RAM + "RateApplicablePercent",
+            "{:.2f}".format(Decimal(vat_item["vat_rate"])),
+        )
 
     account = ET.SubElement(payment_means, RAM + "PayeePartyCreditorFinancialAccount")
     _add_text_element(account, RAM + "IBANID", seller_bank_account["iban"])
 
-    institution = ET.SubElement(payment_means, RAM + "PayeeSpecifiedCreditorFinancialInstitution")
+    institution = ET.SubElement(
+        payment_means, RAM + "PayeeSpecifiedCreditorFinancialInstitution"
+    )
     _add_text_element(institution, RAM + "BICID", seller_bank_account["bic_swift"])
 
     terms = ET.SubElement(settlement, RAM + "SpecifiedTradePaymentTerms")
@@ -181,11 +216,13 @@ def q2zugferd_xml(zugferd_data: dict):
     # ✅ EN 16931: DUE DATE AS STRUCTURED DATE
     if invoice_header.get("due_date"):
         due_date = ET.SubElement(settlement, RAM + "DueDateDateTime")
-        ET.SubElement(due_date, UDT + "DateTimeString", format="102").text = invoice_header[
-            "due_date"
-        ].replace("-", "")
+        ET.SubElement(
+            due_date, UDT + "DateTimeString", format="102"
+        ).text = invoice_header["due_date"].replace("-", "")
 
-    monetary_sum = ET.SubElement(settlement, RAM + "SpecifiedTradeSettlementHeaderMonetarySummation")
+    monetary_sum = ET.SubElement(
+        settlement, RAM + "SpecifiedTradeSettlementHeaderMonetarySummation"
+    )
 
     net_amount = Decimal(invoice_header["net_amount"])
     tax_total = Decimal(invoice_header["gross_amount"]) - net_amount
@@ -200,12 +237,16 @@ def q2zugferd_xml(zugferd_data: dict):
     _add_text_element(monetary_sum, RAM + "ChargeTotalAmount", "0.00")
     _add_text_element(monetary_sum, RAM + "AllowanceTotalAmount", "0.00")
 
-    payment_base_text = f'Zahlungsziel: {invoice_header["payment_terms_days"]} Tage netto.'
+    payment_base_text = (
+        f"Zahlungsziel: {invoice_header['payment_terms_days']} Tage netto."
+    )
 
     if Decimal(invoice_header.get("skonto_rate", 0)) > 0:
-        payment_base_text += f' {invoice_header["skonto_rate"]}% Skonto bei Zahlung bis zum {invoice_header["skonto_due_date"]}.'
+        payment_base_text += f" {invoice_header['skonto_rate']}% Skonto bei Zahlung bis zum {invoice_header['skonto_due_date']}."
 
     _add_text_element(terms, RAM + "Description", payment_base_text)
 
-    zu = ET.tostring(root, pretty_print=True, encoding="UTF-8", xml_declaration=True).decode("utf-8")
+    zu = ET.tostring(
+        root, pretty_print=True, encoding="UTF-8", xml_declaration=True
+    ).decode("utf-8")
     return zu
