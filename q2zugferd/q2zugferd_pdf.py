@@ -5,48 +5,61 @@ from importlib.resources import files
 
 
 def replace_device_rgb_recursive(pdf, resources, icc_ref):
-    """Recursively replace all DeviceRGB ColorSpaces in resources with ICCBased"""
+    """Рекурсивно заменяет DeviceRGB на ICCBased во всех ресурсах и объектах."""
     if not isinstance(resources, Dictionary):
         return
 
+    # Установка DefaultRGB для текущего контекста ресурсов
     resources["/DefaultRGB"] = icc_ref
 
-    # Replace /ColorSpace entries
+    # 1. Обработка словаря ColorSpace
     color_spaces = resources.get("/ColorSpace")
     if isinstance(color_spaces, Dictionary):
         for cs_name, cs_ref in list(color_spaces.items()):
             try:
-                # If cs_ref is a direct Name("/DeviceRGB")
-                if cs_ref == Name("/DeviceRGB") or cs_ref == "/DeviceRGB":
-                    icc_array = Array([Name("/ICCBased"), icc_ref, 3])
-                    color_spaces[cs_name] = pdf.make_indirect(icc_array)
+                # Если прямая ссылка на Name("/DeviceRGB")
+                if cs_ref == "/DeviceRGB" or cs_ref == Name("/DeviceRGB"):
+                    color_spaces[cs_name] = Array([Name("/ICCBased"), icc_ref])
                 else:
-                    cs = cs_ref.resolve()
-                    if isinstance(cs, Dictionary) and cs.get("/CS") == "/DeviceRGB":
-                        icc_array = Array([Name("/ICCBased"), icc_ref, 3])
-                        color_spaces[cs_name] = pdf.make_indirect(icc_array)
+                    cs_obj = cs_ref.resolve()
+                    if isinstance(cs_obj, (Dictionary, Array)) and "/DeviceRGB" in str(
+                        cs_obj
+                    ):
+                        color_spaces[cs_name] = Array([Name("/ICCBased"), icc_ref])
             except Exception:
                 pass
 
-    # XObjects
+    # 2. Обработка XObjects (Images и Forms)
     xobjects = resources.get("/XObject")
     if isinstance(xobjects, Dictionary):
         for xobj_name, xobj_ref in xobjects.items():
             try:
                 xobj = xobj_ref.resolve()
-                if isinstance(xobj, Dictionary):
-                    if xobj.get("/Subtype") == "/Form":
-                        xobj_resources = xobj.get("/Resources", Dictionary())
-                        replace_device_rgb_recursive(pdf, xobj_resources, icc_ref)
-                        xobj["/Resources"] = xobj_resources
-                    group = xobj.get("/Group")
-                    if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
-                        if group.get("/CS") == "/DeviceRGB":
-                            group["/CS"] = icc_ref
+                if not isinstance(xobj, Dictionary):
+                    continue
+
+                # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ДЛЯ ИЗОБРАЖЕНИЙ ---
+                # Если само изображение использует /DeviceRGB
+                if xobj.get("/Subtype") == "/Image":
+                    cs = xobj.get("/ColorSpace")
+                    if cs == "/DeviceRGB" or cs == Name("/DeviceRGB"):
+                        # Заменяем прямо в объекте изображения
+                        xobj["/ColorSpace"] = Array([Name("/ICCBased"), icc_ref])
+
+                # Рекурсия для вложенных форм
+                if xobj.get("/Subtype") == "/Form":
+                    xobj_resources = xobj.get("/Resources", Dictionary())
+                    replace_device_rgb_recursive(pdf, xobj_resources, icc_ref)
+                    xobj["/Resources"] = xobj_resources
+
+                # Исправление цветовой группы прозрачности
+                group = xobj.get("/Group")
+                if isinstance(group, Dictionary) and group.get("/CS") == "/DeviceRGB":
+                    group["/CS"] = icc_ref
             except Exception:
                 pass
 
-    # Patterns
+    # 3. Исправление в паттернах (Patterns)
     patterns = resources.get("/Pattern")
     if isinstance(patterns, Dictionary):
         for pat_name, pat_ref in patterns.items():
@@ -56,20 +69,6 @@ def replace_device_rgb_recursive(pdf, resources, icc_ref):
                     pat_res = pat.get("/Resources", Dictionary())
                     replace_device_rgb_recursive(pdf, pat_res, icc_ref)
                     pat["/Resources"] = pat_res
-            except Exception:
-                pass
-
-    # ExtGState
-    extgstate = resources.get("/ExtGState")
-    if isinstance(extgstate, Dictionary):
-        for gs_name, gs_ref in extgstate.items():
-            try:
-                gs = gs_ref.resolve()
-                if isinstance(gs, Dictionary):
-                    if "/BG" in gs and gs["/BG"] == "/DeviceRGB":
-                        gs["/BG"] = icc_ref
-                    if "/BG2" in gs and gs["/BG2"] == "/DeviceRGB":
-                        gs["/BG2"] = icc_ref
             except Exception:
                 pass
 
@@ -101,9 +100,14 @@ def scan_for_device_rgb(pdf):
                         xobj_resources = xobj.get("/Resources", Dictionary())
                         check_resources(xobj_resources, path + f"/XObject/{xobj_name}")
                         group = xobj.get("/Group")
-                        if isinstance(group, Dictionary) and group.get("/S") == "/Transparency":
+                        if (
+                            isinstance(group, Dictionary)
+                            and group.get("/S") == "/Transparency"
+                        ):
                             if group.get("/CS") == "/DeviceRGB":
-                                print(f"DeviceRGB found at {path}/XObject/{xobj_name}/Group/CS")
+                                print(
+                                    f"DeviceRGB found at {path}/XObject/{xobj_name}/Group/CS"
+                                )
                                 issues_found += 1
                 except Exception:
                     pass
@@ -153,14 +157,17 @@ def scan_for_device_rgb(pdf):
 
 
 def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
-    """_summary_
+    (
+        """_summary_
 
     Args:
         input_pdf (_type_): _description_
         xml_path (_type_): _description_
         output_pdf (_type_): _description_
         pdfa_level (str, optional): _description_. Defaults to "B".
-    """    """Main function with automatic DeviceRGB check"""
+    """
+        """Main function with automatic DeviceRGB check"""
+    )
     # --- Open PDF ---
     pdf = pikepdf.open(input_pdf)
 
@@ -176,14 +183,15 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     output_intent = Dictionary(
         {
             "/Type": "/OutputIntent",
-            "/S": "/GTS_PDFA1",
+            "/S": Name("/GTS_PDFA1"),  # Используем объект Name
+            "/OutputCondition": "sRGB",
             "/OutputConditionIdentifier": "sRGB IEC61966-2.1",
             "/RegistryName": "http://www.color.org",
             "/DestOutputProfile": icc_ref,
             "/Info": "sRGB2014 ICC profile",
         }
     )
-    pdf.Root["/OutputIntents"] = [output_intent]
+    pdf.Root["/OutputIntents"] = pdf.make_indirect(Array([output_intent]))
 
     # --- Fix DeviceRGB ---
     if "/Resources" not in pdf.Root:
