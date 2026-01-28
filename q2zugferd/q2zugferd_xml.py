@@ -1,17 +1,17 @@
 from lxml import etree as ET
 from decimal import Decimal
+import re
 
 NS_MAP = {
     "rsm": "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100",
+    "xsi": "http://www.w3.org/2001/XMLSchema-instance",
     "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100",
     "udt": "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100",
-    "qdt": "urn:un:unece:uncefact:data:standard:QualifiedDataType:100",
 }
 
 RAM = "{%s}" % NS_MAP["ram"]
 RSM = "{%s}" % NS_MAP["rsm"]
 UDT = "{%s}" % NS_MAP["udt"]
-QDT = "{%s}" % NS_MAP["qdt"]
 
 
 def q2zugferd_xml(zugferd_data: dict):
@@ -24,61 +24,48 @@ def q2zugferd_xml(zugferd_data: dict):
     vat_breakdown = zugferd_data["vat_breakdown"]
 
     def _add_text_element(parent, tag_name, text_value):
-        if text_value is not None and text_value != "":
+        if text_value is not None and str(text_value).strip() != "":
             elem = ET.SubElement(parent, tag_name)
             elem.text = str(text_value)
             return elem
 
     root = ET.Element(RSM + "CrossIndustryInvoice", nsmap=NS_MAP)
 
-    # ------------------------------------------------------------------
-    # 1. CONTEXT (EN 16931 COMFORT)
-    # ------------------------------------------------------------------
+    # 1. CONTEXT
     context = ET.SubElement(root, RSM + "ExchangedDocumentContext")
-
-    bus_proc = ET.SubElement(
-        context, RAM + "BusinessProcessSpecifiedDocumentContextParameter"
-    )
-    _add_text_element(bus_proc, RAM + "ID", "urn:factur-x.eu:1p0:comfort")
-
+    # bus_proc = ET.SubElement(
+    #     context, RAM + "BusinessProcessSpecifiedDocumentContextParameter"
+    # )
+    # _add_text_element(bus_proc, RAM + "ID", "urn:factur-x.eu:1p0:comfort")
     spec_doc = ET.SubElement(
         context, RAM + "GuidelineSpecifiedDocumentContextParameter"
     )
     _add_text_element(
         spec_doc,
         RAM + "ID",
-        "urn:cen.eu:en16931:2017#conformant#urn:factur-x.eu:1p0:comfort",
+        "urn:cen.eu:en16931:2017",
     )
 
-    # ------------------------------------------------------------------
     # 2. DOCUMENT HEADER
-    # ------------------------------------------------------------------
     doc = ET.SubElement(root, RSM + "ExchangedDocument")
     _add_text_element(doc, RAM + "ID", invoice_header["invoice_number"])
     _add_text_element(doc, RAM + "TypeCode", "380")
-
     issue_date_time = ET.SubElement(doc, RAM + "IssueDateTime")
-    date_str = invoice_header["invoice_date"].replace("-", "")
-    ET.SubElement(issue_date_time, UDT + "DateTimeString", format="102").text = date_str
+    ET.SubElement(
+        issue_date_time, UDT + "DateTimeString", format="102"
+    ).text = invoice_header["invoice_date"].replace("-", "")
 
-    if invoice_header.get("initial_note"):
-        note1 = ET.SubElement(doc, RAM + "IncludedNote")
-        ET.SubElement(note1, RAM + "Content").text = invoice_header["initial_note"]
+    # for note_key in ["initial_note", "closing_note"]:
+    #     if invoice_header.get(note_key):
+    #         note = ET.SubElement(doc, RAM + "IncludedNote")
+    #         ET.SubElement(note, RAM + "Content").text = invoice_header[note_key]
 
-    if invoice_header.get("closing_note"):
-        note2 = ET.SubElement(doc, RAM + "IncludedNote")
-        ET.SubElement(note2, RAM + "Content").text = invoice_header["closing_note"]
+    # _add_text_element(doc, RAM + "LanguageID", "deu")
 
-    _add_text_element(doc, RAM + "LanguageID", "deu")
-
-    # ------------------------------------------------------------------
-    # B. TRANSACTION
-    # ------------------------------------------------------------------
+    # 3. TRANSACTION (СТРОГИЙ ПОРЯДОК: Lines -> Agreement -> Delivery -> Settlement)
     transaction = ET.SubElement(root, RSM + "SupplyChainTradeTransaction")
 
-    # -----------------------------
-    # LINE ITEMS
-    # -----------------------------
+    # --- LINE ITEMS ---
     for line in invoice_lines:
         line_item = ET.SubElement(transaction, RAM + "IncludedSupplyChainTradeLineItem")
 
@@ -89,24 +76,27 @@ def q2zugferd_xml(zugferd_data: dict):
         _add_text_element(product, RAM + "Name", line["name"])
         _add_text_element(product, RAM + "Description", line["description"])
 
-        trade_delivery = ET.SubElement(line_item, RAM + "SpecifiedLineTradeDelivery")
-        unit_code = line.get("unit_code", "PCE")
-        billed_qty = ET.SubElement(
-            trade_delivery, RAM + "BilledQuantity", unitCode=unit_code
-        )
-        billed_qty.text = "{:.4f}".format(Decimal(line["quantity"]))
-
-        # ✅ EN 16931: UNIT PRICE (MANDATORY)
         trade_agreement = ET.SubElement(line_item, RAM + "SpecifiedLineTradeAgreement")
         net_price = ET.SubElement(trade_agreement, RAM + "NetPriceProductTradePrice")
         _add_text_element(
-            net_price, RAM + "ChargeAmount", "{:.2f}".format(Decimal(line["net_price"]))
+            net_price, RAM + "ChargeAmount", "{:.4f}".format(Decimal(line["net_price"]))
         )
+        ET.SubElement(
+            net_price,
+            RAM + "BasisQuantity",
+            unitCode=line.get("unit_code", "PCE"),
+        ).text = "{:.4f}".format(Decimal(1))
+
+        trade_delivery = ET.SubElement(line_item, RAM + "SpecifiedLineTradeDelivery")
+        ET.SubElement(
+            trade_delivery,
+            RAM + "BilledQuantity",
+            unitCode=line.get("unit_code", "PCE"),
+        ).text = "{:.4f}".format(Decimal(line["quantity"]))
 
         trade_settlement = ET.SubElement(
             line_item, RAM + "SpecifiedLineTradeSettlement"
         )
-
         tax = ET.SubElement(trade_settlement, RAM + "ApplicableTradeTax")
         _add_text_element(tax, RAM + "TypeCode", "VAT")
         _add_text_element(tax, RAM + "CategoryCode", "S")
@@ -122,20 +112,14 @@ def q2zugferd_xml(zugferd_data: dict):
         _add_text_element(
             monetary_sum,
             RAM + "LineTotalAmount",
-            "{:.2f}".format(Decimal(line.get("net_line_total", line.get("net_total")))),
+            "{:.2f}".format(Decimal(line.get("net_line_total", line["net_total"]))),
         )
 
-    # ------------------------------------------------------------------
-    # C. AGREEMENT
-    # ------------------------------------------------------------------
+    # --- AGREEMENT ---
     agreement = ET.SubElement(transaction, RAM + "ApplicableHeaderTradeAgreement")
-
+    _add_text_element(agreement, RAM + "BuyerReference", buyer["part_id"])
     seller_party = ET.SubElement(agreement, RAM + "SellerTradeParty")
     _add_text_element(seller_party, RAM + "Name", seller["name"])
-
-    if seller.get("vat_id"):
-        tax_reg = ET.SubElement(seller_party, RAM + "SpecifiedTaxRegistration")
-        _add_text_element(tax_reg, RAM + "ID", seller["vat_id"])
 
     seller_addr = ET.SubElement(seller_party, RAM + "PostalTradeAddress")
     _add_text_element(seller_addr, RAM + "PostcodeCode", seller["postal_code"])
@@ -143,45 +127,52 @@ def q2zugferd_xml(zugferd_data: dict):
     _add_text_element(seller_addr, RAM + "CityName", seller["city"])
     _add_text_element(seller_addr, RAM + "CountryID", seller["country_code"])
 
-    buyer_party = ET.SubElement(agreement, RAM + "BuyerTradeParty")
-    _add_text_element(buyer_party, RAM + "Name", buyer["name"])
+    if seller.get("vat_id"):
+        tax_reg = ET.SubElement(seller_party, RAM + "SpecifiedTaxRegistration")
+        tax_id_elem = ET.SubElement(tax_reg, RAM + "ID", schemeID="VA")
+        tax_id_elem.text = seller["vat_id"]
 
-    # ✅ EN 16931: BUYER ADDRESS IS MANDATORY
+    buyer_party = ET.SubElement(agreement, RAM + "BuyerTradeParty")
+    _add_text_element(buyer_party, RAM + "ID", buyer["part_id"])
+    _add_text_element(buyer_party, RAM + "Name", buyer["name"])
     buyer_addr = ET.SubElement(buyer_party, RAM + "PostalTradeAddress")
     _add_text_element(buyer_addr, RAM + "PostcodeCode", buyer["postal_code"])
     _add_text_element(buyer_addr, RAM + "LineOne", buyer["street"])
     _add_text_element(buyer_addr, RAM + "CityName", buyer["city"])
     _add_text_element(buyer_addr, RAM + "CountryID", buyer["country_code"])
 
-    if buyer.get("vat_id"):
-        tax_reg = ET.SubElement(buyer_party, RAM + "SpecifiedTaxRegistration")
-        _add_text_element(tax_reg, RAM + "ID", buyer["vat_id"])
-
-    # ------------------------------------------------------------------
-    # D. DELIVERY
-    # ------------------------------------------------------------------
+    # --- DELIVERY ---
     trade_delivery = ET.SubElement(transaction, RAM + "ApplicableHeaderTradeDelivery")
     delivery_event = ET.SubElement(
         trade_delivery, RAM + "ActualDeliverySupplyChainEvent"
     )
-
     occurrence_date = ET.SubElement(delivery_event, RAM + "OccurrenceDateTime")
-    delivery_date_str = invoice_header["delivery_date"].replace("-", "")
     ET.SubElement(
         occurrence_date, UDT + "DateTimeString", format="102"
-    ).text = delivery_date_str
+    ).text = invoice_header["delivery_date"].replace("-", "")
 
-    # ------------------------------------------------------------------
-    # E. SETTLEMENT
-    # ------------------------------------------------------------------
+    # --- SETTLEMENT ---
     settlement = ET.SubElement(transaction, RAM + "ApplicableHeaderTradeSettlement")
+    _add_text_element(
+        settlement, RAM + "PaymentReference", invoice_header["invoice_number"]
+    )
     _add_text_element(settlement, RAM + "InvoiceCurrencyCode", currency["iso_code"])
-    _add_text_element(settlement, RAM + "TaxCurrencyCode", currency["iso_code"])
 
     payment_means = ET.SubElement(
         settlement, RAM + "SpecifiedTradeSettlementPaymentMeans"
     )
-    _add_text_element(payment_means, RAM + "TypeCode", "30")
+    _add_text_element(payment_means, RAM + "TypeCode", "42")
+    _add_text_element(payment_means, RAM + "Information", "Bank transfer")
+    account = ET.SubElement(payment_means, RAM + "PayeePartyCreditorFinancialAccount")
+    # Очистка IBAN от пробелов
+    clean_iban = re.sub(r"\s+", "", seller_bank_account["iban"])
+    _add_text_element(account, RAM + "IBANID", clean_iban)
+    # _add_text_element(account, RAM + "AccountName", "Max Mustermann")
+
+    institution = ET.SubElement(
+        payment_means, RAM + "PayeeSpecifiedCreditorFinancialInstitution"
+    )
+    _add_text_element(institution, RAM + "BICID", seller_bank_account["bic_swift"])
 
     for vat_item in vat_breakdown:
         tax = ET.SubElement(settlement, RAM + "ApplicableTradeTax")
@@ -203,19 +194,14 @@ def q2zugferd_xml(zugferd_data: dict):
             "{:.2f}".format(Decimal(vat_item["vat_rate"])),
         )
 
-    account = ET.SubElement(payment_means, RAM + "PayeePartyCreditorFinancialAccount")
-    _add_text_element(account, RAM + "IBANID", seller_bank_account["iban"])
-
-    institution = ET.SubElement(
-        payment_means, RAM + "PayeeSpecifiedCreditorFinancialInstitution"
-    )
-    _add_text_element(institution, RAM + "BICID", seller_bank_account["bic_swift"])
-
     terms = ET.SubElement(settlement, RAM + "SpecifiedTradePaymentTerms")
+    desc = f"Zahlungsziel: {invoice_header['payment_terms_days']} Tage netto."
+    if Decimal(invoice_header.get("skonto_rate", 0)) > 0:
+        desc += f" {invoice_header['skonto_rate']}% Skonto bis {invoice_header['skonto_due_date']}."
+    _add_text_element(terms, RAM + "Description", desc)
 
-    # ✅ EN 16931: DUE DATE AS STRUCTURED DATE
     if invoice_header.get("due_date"):
-        due_date = ET.SubElement(settlement, RAM + "DueDateDateTime")
+        due_date = ET.SubElement(terms, RAM + "DueDateDateTime")
         ET.SubElement(
             due_date, UDT + "DateTimeString", format="102"
         ).text = invoice_header["due_date"].replace("-", "")
@@ -223,30 +209,29 @@ def q2zugferd_xml(zugferd_data: dict):
     monetary_sum = ET.SubElement(
         settlement, RAM + "SpecifiedTradeSettlementHeaderMonetarySummation"
     )
+    net = Decimal(invoice_header["net_amount"])
+    # Расчет налога на основе breakdown для точности
+    tax_total = sum(Decimal(v["tax_amount"]) for v in vat_breakdown)
 
-    net_amount = Decimal(invoice_header["net_amount"])
-    tax_total = Decimal(invoice_header["gross_amount"]) - net_amount
-    gross_amount = Decimal(invoice_header["gross_amount"])
-
-    _add_text_element(monetary_sum, RAM + "LineTotalAmount", f"{net_amount:.2f}")
-    _add_text_element(monetary_sum, RAM + "TaxBasisTotalAmount", f"{net_amount:.2f}")
-    _add_text_element(monetary_sum, RAM + "TaxTotalAmount", f"{tax_total:.2f}")
-    _add_text_element(monetary_sum, RAM + "GrandTotalAmount", f"{gross_amount:.2f}")
-
-    # ✅ Mandatory even if zero:
+    _add_text_element(monetary_sum, RAM + "LineTotalAmount", "{:.2f}".format(net))
     _add_text_element(monetary_sum, RAM + "ChargeTotalAmount", "0.00")
     _add_text_element(monetary_sum, RAM + "AllowanceTotalAmount", "0.00")
-
-    payment_base_text = (
-        f"Zahlungsziel: {invoice_header['payment_terms_days']} Tage netto."
+    _add_text_element(monetary_sum, RAM + "TaxBasisTotalAmount", "{:.2f}".format(net))
+    el = _add_text_element(
+        monetary_sum, RAM + "TaxTotalAmount", "{:.2f}".format(tax_total)
+    )
+    if el is not None:
+        el.set("currencyID", currency["iso_code"])
+    _add_text_element(
+        monetary_sum, RAM + "GrandTotalAmount", "{:.2f}".format(net + tax_total)
+    )
+    _add_text_element(
+        monetary_sum, RAM + "TotalPrepaidAmount", "{:.2f}".format(Decimal(0))
+    )
+    _add_text_element(
+        monetary_sum, RAM + "DuePayableAmount", "{:.2f}".format(net + tax_total)
     )
 
-    if Decimal(invoice_header.get("skonto_rate", 0)) > 0:
-        payment_base_text += f" {invoice_header['skonto_rate']}% Skonto bei Zahlung bis zum {invoice_header['skonto_due_date']}."
-
-    _add_text_element(terms, RAM + "Description", payment_base_text)
-
-    zu = ET.tostring(
+    return ET.tostring(
         root, pretty_print=True, encoding="UTF-8", xml_declaration=True
     ).decode("utf-8")
-    return zu
