@@ -1,6 +1,6 @@
 import os
 import pikepdf
-from pikepdf import Dictionary, Name, Array
+from pikepdf import Dictionary, Name, Array, Stream
 from importlib.resources import files
 
 
@@ -156,7 +156,7 @@ def scan_for_device_rgb(pdf):
         print(f"⚠️ Total DeviceRGB references remaining: {issues_found}")
 
 
-def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
+def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="U"):
     (
         """_summary_
 
@@ -170,6 +170,8 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     )
     # --- Open PDF ---
     pdf = pikepdf.open(input_pdf)
+    info = pdf.docinfo
+    info["/Creator"] = "q2zugferd"
 
     # --- Load ICC profile ---
     icc_profile_path = files("q2zugferd").joinpath("icc/sRGB2014.icc")
@@ -180,18 +182,20 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     icc_ref = pdf.make_indirect(icc_stream)
 
     # --- OutputIntent ---
-    output_intent = Dictionary(
-        {
-            "/Type": "/OutputIntent",
-            "/S": Name("/GTS_PDFA1"),  # Используем объект Name
-            "/OutputCondition": "sRGB",
-            "/OutputConditionIdentifier": "sRGB IEC61966-2.1",
-            "/RegistryName": "http://www.color.org",
-            "/DestOutputProfile": icc_ref,
-            "/Info": "sRGB2014 ICC profile",
-        }
+    oid = Dictionary(
+        Type=Name.OutputIntent,
+        S=Name("/GTS_PDFA1"),
+        OutputCondition="sRGB",
+        OutputConditionIdentifier="sRGB IEC61966-2.1",
+        RegistryName="http://www.color.org",
+        DestOutputProfile=icc_ref,
+        Info="sRGB2014 ICC profile",
     )
-    pdf.Root["/OutputIntents"] = pdf.make_indirect(Array([output_intent]))
+
+    output_intent_ref = pdf.make_indirect(oid)
+    output_intent = Array([output_intent_ref])
+
+    pdf.Root["/OutputIntents"] = output_intent
 
     # --- Fix DeviceRGB ---
     if "/Resources" not in pdf.Root:
@@ -215,36 +219,51 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     else:
         xml_bytes = xml_path.encode("utf-8")
     xml_filename = "factur-x.xml"
-    xml_mime = Name("/application/xml")
+    xml_mime = Name("/text/xml")
     ef_stream = pdf.make_stream(xml_bytes)
-    ef_stream["/Type"] = "/EmbeddedFile"
+    
+    ef_stream["/Type"] = Name.EmbeddedFile
     ef_stream["/Subtype"] = xml_mime
-    file_spec = Dictionary(
-        {
-            "/Type": "/Filespec",
-            "/F": xml_filename,
-            "/UF": xml_filename,
-            "/AFRelationship": Name("/Data"),
-            "/Subtype": xml_mime,
-            "/EF": Dictionary({"/F": pdf.make_indirect(ef_stream)}),
-            "/Desc": "ZUGFeRD Invoice",
-        }
+    ef_stream["/Params"] = Dictionary()
+    ef_stream["/Params"]["/CreationDate"] = info["/CreationDate"]
+    ef_stream["/Params"]["/Size"] = ef_stream["/Length"]
+
+    ef_stream_ref = pdf.make_indirect(ef_stream)
+
+    files_dict = Dictionary()
+    files_dict["/F"] = ef_stream_ref
+    files_dict["/UF"] = ef_stream_ref
+    files_dict_ref = pdf.make_indirect(files_dict)
+
+    filespec = Dictionary(
+        Type=Name.Filespec,
+        F=xml_filename,
+        UF=xml_filename,
     )
-    file_spec_ref = pdf.make_indirect(file_spec)
+    filespec["/AFRelationship"] = Name("/Alternative")
+    filespec["/Desc"] = "Invoice metadata: ZUGFeRD standard"
+    filespec["/EF"] = files_dict_ref
+
+    filespec_ref = pdf.make_indirect(filespec)
+
+    ef_tree_dict = Dictionary()
+    ef_tree_dict.Names = Array([xml_filename, filespec_ref])
+    ef_tree_ref = pdf.make_indirect(ef_tree_dict)
 
     # Names dictionary
     if "/Names" not in pdf.Root:
         pdf.Root["/Names"] = Dictionary()
-    names = pdf.Root["/Names"]
-    if "/EmbeddedFiles" not in names:
-        names["/EmbeddedFiles"] = Dictionary()
-    embedded_files = names["/EmbeddedFiles"]
-    if "/Names" not in embedded_files:
-        embedded_files["/Names"] = []
-    embedded_files["/Names"].extend([xml_filename, file_spec_ref])
+
+    if "/Names" not in pdf.Root:
+        pdf.Root.Names = Dictionary()
+
+    # Теперь pdf.Root.Names.EmbeddedFiles будет указывать на 16 0 R
+    pdf.Root.Names.EmbeddedFiles = ef_tree_ref
+
+    pdf.Root.Lang = "de-DE"
     if "/AF" not in pdf.Root:
-        pdf.Root["/AF"] = []
-    pdf.Root["/AF"].append(file_spec_ref)
+        pdf.Root.AF = Array()
+    pdf.Root.AF.append(filespec_ref)
 
     # Minimal XMP metadata with compliant extension schema
     profile_name = "EN 16931"
@@ -329,7 +348,7 @@ def q2zugferd_pdf(input_pdf, xml_path, output_pdf, pdfa_level="B"):
     pdf.Root["/Metadata"] = pdf.make_indirect(meta_stream)
 
     # --- Save ---
-    pdf.save(output_pdf, linearize=True)
+    pdf.save(output_pdf, linearize=False, compress_streams=False)
     pdf.close()
 
     # --- Automatic check after saving ---
