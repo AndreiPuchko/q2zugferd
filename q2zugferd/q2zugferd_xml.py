@@ -4,6 +4,7 @@ import re
 
 NS_MAP = {
     "rsm": "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100",
+    "qdt": "urn:un:unece:uncefact:data:standard:QualifiedDataType:100",
     "xsi": "http://www.w3.org/2001/XMLSchema-instance",
     "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100",
     "udt": "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100",
